@@ -54,6 +54,14 @@ form:
                 only: Only Featured
               overridable: false
 
+            article.filter.recent_days:
+              type: input.number
+              label: Recent Days Filter
+              description: 'Only include articles with publish_up in the last X days. 0 = no limit. Combine with Order By = Hits + DESC for "most viewed recently".'
+              default: 0
+              min: 0
+              overridable: false
+
             article.limit.total:
               type: input.number
               label: Number of Articles
@@ -65,11 +73,12 @@ form:
             article.display.pagination_buttons:
               type: select.select
               label: Pagination
-              description: Select if the pagination buttons should be shown to allow users to see more articles.
+              description: 'Select pagination mode. Prev/Next replaces the list, Load More appends it (see Load More tab). Do not use Load More with Ordering Direction = Random.'
               default: ''
               options:
-                show: Show
                 '': Hide
+                pagination: Prev / Next
+                loadmore: Load More
               overridable: false
 
             article.limit.columns:
@@ -106,6 +115,7 @@ form:
                 title: Title
                 ordering: Ordering
                 hits: Hits
+                hits_recent: Hits (last X days)
                 id: ID
                 alias: Alias
               overridable: false
@@ -113,12 +123,64 @@ form:
             article.sort.ordering:
               type: select.select
               label: Ordering Direction
-              description: Select the direction the articles should be ordered by.
+              description: 'Select the direction the articles should be ordered by. RANDOM is not compatible with Load More (duplicates/skips).'
               default: ASC
               options:
                 ASC: Ascending
                 DESC: Descending
                 RANDOM: Random
+              overridable: false
+
+        _tab_loadmore:
+          label: Load More
+          fields:
+            _note_loadmore:
+              type: separator.note
+              class: alert alert-info
+              content: 'These settings apply only when Pagination is set to Load More.'
+
+            article.limit.load_more_step:
+              type: input.number
+              label: Articles per Click
+              description: 'Number of articles appended at each Load More click. Visual rows depend on columns, e.g. 4 articles with 2 columns equal 2 rows.'
+              default: 2
+              min: 1
+              overridable: false
+
+            article.limit.load_more_max:
+              type: input.number
+              label: Max Articles (Load More)
+              description: 'Total articles reachable with Load More, initial ones included. 0 means no cap, load until articles run out.'
+              default: 0
+              min: 0
+              overridable: false
+
+            article.display.load_more.label:
+              type: input.text
+              label: Load More Label
+              description: Text of the Load More button.
+              default: 'Load More'
+              overridable: false
+
+            article.display.load_more.loading_label:
+              type: input.text
+              label: Loading Label
+              description: Button text while fetching articles.
+              default: 'Loading...'
+              overridable: false
+
+            article.display.load_more.archive_label:
+              type: input.text
+              label: Archive Button Text
+              description: 'Text of the button shown when no more articles are left.'
+              default: "Vai all'archivio"
+              overridable: false
+
+            article.display.load_more.archive_url:
+              type: input.text
+              label: Archive Button Link
+              description: 'URL opened by the archive button, e.g. /archivio.'
+              default: ''
               overridable: false
 
         _tab_display:
@@ -186,6 +248,15 @@ form:
               description: Enter the maximum number of characters the article title should be limited to.
               pattern: '\d+(\.\d+){0,1}'
 
+            article.display.title.overlay:
+              type: select.select
+              label: Title Overlay on Image
+              description: "If enabled, the image becomes the background of a container that holds the title. The link covers the whole container, so you can style an overlay background via CSS."
+              default: ''
+              options:
+                show: Enabled
+                '': Disabled
+
             article.display.date.enabled:
               type: select.select
               label: Date
@@ -217,6 +288,7 @@ form:
                   'l j F Y': Date10
                   'j F Y': Date11
                   'F d, Y': Date12
+                  'l j F H:i': Date13
 
         _tab_readmore:
           label: Read More
@@ -271,6 +343,74 @@ form:
               options:
                 show: Show
                 '': Hide
+
+        _tab_layout:
+          label: Layout Order
+          fields:
+            _note_order:
+              type: separator.note
+              class: alert alert-info
+              content: 'Choose in which order the blocks (Image / Title, Details, Text, Read More) are rendered inside each article. Use 1-5. If Title Overlay is enabled, Image and Title are rendered together at the Image position.'
+
+            article.display.ordering.image:
+              type: select.select
+              label: Image Position
+              description: Position of the image block (or image+title block when overlay is enabled).
+              default: 1
+              options:
+                1: 1
+                2: 2
+                3: 3
+                4: 4
+                5: 5
+
+            article.display.ordering.title:
+              type: select.select
+              label: Title Position
+              description: Position of the title block (ignored when Title Overlay is enabled).
+              default: 2
+              options:
+                1: 1
+                2: 2
+                3: 3
+                4: 4
+                5: 5
+
+            article.display.ordering.details:
+              type: select.select
+              label: Details Position (Date / Author / Category / Hits)
+              description: Position of the details block.
+              default: 3
+              options:
+                1: 1
+                2: 2
+                3: 3
+                4: 4
+                5: 5
+
+            article.display.ordering.text:
+              type: select.select
+              label: Text Position
+              description: Position of the article text block.
+              default: 4
+              options:
+                1: 1
+                2: 2
+                3: 3
+                4: 4
+                5: 5
+
+            article.display.ordering.readmore:
+              type: select.select
+              label: Read More Position
+              description: Position of the Read More button.
+              default: 5
+              options:
+                1: 1
+                2: 2
+                3: 3
+                4: 4
+                5: 5
 
     css.class:
       type: input.selectize

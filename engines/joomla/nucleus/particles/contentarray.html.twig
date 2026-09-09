@@ -31,10 +31,73 @@
     {% do article_finder.featured(true) %}
 {% endif %}
 
+{# Recent-days filter on publish_up (configurable X). Uses the already public where() on Finder.
+   Skipped when specific article IDs are selected: only those are shown in that case. #}
+{% set recent_days = filter.recent_days|default(0)|int %}
+{% set is_hits_recent = sort.orderby == 'hits_recent' %}
+{% set has_explicit_articles = filter.articles|default('')|trim != '' %}
+{% if (recent_days > 0 or is_hits_recent) and not has_explicit_articles %}
+    {% set days = recent_days > 0 ? recent_days : 30 %}
+    {% set cutoff = ("now"|date_modify("-" ~ days ~ " days"))|date("Y-m-d H:i:s") %}
+    {% do article_finder.where('a.publish_up', '>=', cutoff) %}
+{% endif %}
+
 {% set start = limit.start + max(0, ajax.start|int) %}
-{% do article_finder.order(sort.orderby, sort.ordering).limit(limit.total).start(start) %}
+
+{# Pagination mode: '' = hide, 'pagination' = Prev/Next (replace), 'loadmore' = append.
+   'show' is the legacy value and is treated as 'pagination' for backward compatibility. #}
+{% set raw_pagination = display.pagination_buttons|default('') %}
+{% set pagination_mode = raw_pagination == 'show' ? 'pagination' : raw_pagination %}
+{% set is_pagination = pagination_mode == 'pagination' %}
+{% set is_loadmore = pagination_mode == 'loadmore' %}
+
+{# Load More step: how many articles to append per click. Falls back to limit.total. #}
+{% set load_more_step = article_settings.limit.load_more_step|default(limit.total)|int %}
+{% if load_more_step < 1 %}
+    {% set load_more_step = limit.total|int|default(2) %}
+{% endif %}
+{% set load_more_label = display.load_more.label|default('Load More') %}
+{% set load_more_loading = display.load_more.loading_label|default('Loading...') %}
+{% set load_more_archive_label = display.load_more.archive_label|default('')|trim %}
+{% set load_more_archive_url = display.load_more.archive_url|default('')|trim %}
+{% set has_end = load_more_archive_label and load_more_archive_url %}
+
+{# Effective limit: first render uses limit.total, Load More calls pass ajax.limit = step.
+   Prev/Next keep using limit.total (no ajax.limit). #}
+{% set effective_limit = max(1, ajax.limit|default(limit.total)|int) %}
+{% set load_more_max = article_settings.limit.load_more_max|default(0)|int %}
+{# Max cap for Load More only: includes the initial ones too. 0 = no cap. #}
+{% if is_loadmore and load_more_max > 0 %}
+    {% set remaining = load_more_max - start %}
+    {% if remaining <= 0 %}
+        {% set effective_limit = 0 %}
+    {% elseif effective_limit > remaining %}
+        {% set effective_limit = remaining %}
+    {% endif %}
+{% endif %}
+{% if is_hits_recent %}
+    {% do article_finder.order('hits', sort.ordering|default('DESC')).limit(max(1, effective_limit)).start(start) %}
+{% else %}
+    {% do article_finder.order(sort.orderby, sort.ordering).limit(max(1, effective_limit)).start(start) %}
+{% endif %}
 {% set total = article_finder.count() %}
-{% set articles = article_finder.find() %}
+{% if is_loadmore and load_more_max > 0 and total > load_more_max %}
+    {% set total = load_more_max %}
+{% endif %}
+{% if effective_limit <= 0 %}
+    {% set articles = [] %}
+{% else %}
+    {% set articles = article_finder.find() %}
+{% endif %}
+{% set has_more = (start + effective_limit) < total %}
+
+{# Ordering positions (1-5), fallback to original order for backward compatibility #}
+{% set order_image = display.ordering.image|default(1)|int %}
+{% set order_title = display.ordering.title|default(2)|int %}
+{% set order_details = display.ordering.details|default(3)|int %}
+{% set order_text = display.ordering.text|default(4)|int %}
+{% set order_readmore = display.ordering.readmore|default(5)|int %}
+{% set title_overlay = display.title.overlay == 'show' and display.image.enabled and display.title.enabled %}
 
 {% block particle %}
 
@@ -43,8 +106,9 @@
         {% endif %}
 
     {# All Articles #}
-    <div class="g-content-array g-joomla-articles{% if particle.css.class %} {{ particle.css.class }}{% endif %}" {{- attr_extra|raw }}>
+    <div class="g-content-array g-joomla-articles{% if particle.css.class %} {{ particle.css.class }}{% endif %}{% if title_overlay %} g-title-overlay-enabled{% endif %}" {{- attr_extra|raw }}>
 
+        <div class="g-content-array-items">
         {% for column in articles|batch(limit.columns) %}
             <div class="g-grid">
                 {% for article in column %}
@@ -59,92 +123,117 @@
                                         <a class="g-array-item-edit" href="{{ article.edit }}" aria-describedby="editarticle-{{ article.id }}">{{ 'JGLOBAL_EDIT'|trans }}</a>
                                     {% endif %}
                                 {% endif %}
-                                {% if display.image.enabled and article.images.image_intro or article.images.image_fulltext %}
-                                    {% if article.images.image_intro and display.image.enabled == 'intro' or display.image.enabled == 'show' %}
-                                        <div class="g-array-item-image">
-                                            <a href="{{ article.route }}">
-                                                <img src="{{ url(article.images.image_intro) }}" {{ article.images.image_intro|imagesize|raw }} alt="{{ article.images.image_intro_alt }}" />
-                                            </a>
+
+                                {# Resolve image once per article, reused for both <img> and background overlay #}
+                                {% set article_image = null %}
+                                {% set article_image_alt = '' %}
+                                {% if article.images.image_intro and display.image.enabled in ['intro', 'show'] %}
+                                    {% set article_image = article.images.image_intro %}
+                                    {% set article_image_alt = article.images.image_intro_alt %}
+                                {% elseif article.images.image_fulltext and display.image.enabled == 'full' %}
+                                    {% set article_image = article.images.image_fulltext %}
+                                    {% set article_image_alt = article.images.image_fulltext_alt %}
+                                {% endif %}
+                                {% set use_overlay = title_overlay and article_image %}
+
+                                {% for pos in 1..5 %}
+                                    {# IMAGE or IMAGE+TITLE OVERLAY #}
+                                    {% if order_image == pos and display.image.enabled and article_image %}
+                                                              {% if use_overlay %}
+                                                                  <div class="g-array-item-image-title g-array-item-image-title-overlay" style="background-image: url('{{ url(article_image) }}');" role="img" aria-label="{{ article_image_alt|default(article.title)|e }}">
+                                                                      <a href="{{ article.route }}" class="g-array-item-image-title-link" aria-label="{{ (display.title.limit ? article.title|truncate_text(display.title.limit) : article.title)|e }}">
+                                                                          <div class="g-array-item-image-title-overlay-bg"></div>
+                                                                          <div class="g-array-item-title">
+                                                                              <h3 class="g-item-title">
+                                                                                  {{ display.title.limit ? article.title|truncate_text(display.title.limit) : article.title }}
+                                                                              </h3>
+                                                                          </div>
+                                                                      </a>
+                                                                  </div>
+                                        {% else %}
+                                            <div class="g-array-item-image">
+                                                <a href="{{ article.route }}">
+                                                    <img src="{{ url(article_image) }}" {{ article_image|imagesize|raw }} alt="{{ article_image_alt }}" />
+                                                </a>
+                                            </div>
+                                        {% endif %}
+                                    {% endif %}
+
+                                    {# Standalone TITLE (skipped when overlay is active and an image is present) #}
+                                    {% if order_title == pos and display.title.enabled and not use_overlay %}
+                                        <div class="g-array-item-title">
+                                            <h3 class="g-item-title">
+                                                <a href="{{ article.route }}">
+                                                    {{ display.title.limit ? article.title|truncate_text(display.title.limit) : article.title }}
+                                                </a>
+                                            </h3>
                                         </div>
-                                    {% elseif article.images.image_fulltext and display.image.enabled == 'full' %}
-                                        <div class="g-array-item-image">
-                                            <a href="{{ article.route }}">
-                                                <img src="{{ url(article.images.image_fulltext) }}" {{ article.images.image_fulltext|imagesize|raw }} alt="{{ article.images.image_fulltext_alt }}" />
+                                    {% endif %}
+
+                                    {# DETAILS #}
+                                    {% if order_details == pos and (display.date.enabled or display.author.enabled or display.category.enabled or display.hits.enabled) %}
+                                        <div class="g-array-item-details">
+                                            {% if display.date.enabled %}
+                                                <span class="g-array-item-date">
+                                                    {% if display.date.enabled == 'published' %}
+                                                        <i class="far fa-clock" aria-hidden="true"></i>{{ article.publish_up|date(display.date.format) }}
+                                                    {% elseif display.date.enabled == 'modified' %}
+                                                        <i class="far fa-clock" aria-hidden="true"></i>{{ article.modified|date(display.date.format) }}
+                                                    {% else %}
+                                                        <i class="far fa-clock" aria-hidden="true"></i>{{ article.created|date(display.date.format) }}
+                                                    {% endif %}
+                                                </span>
+                                            {% endif %}
+
+                                            {% if display.author.enabled %}
+                                                <span class="g-array-item-author">
+                                                    <i class="fa fa-user" aria-hidden="true"></i>{{ article.author.name }}
+                                                </span>
+                                            {% endif %}
+
+                                            {% if display.category.enabled %}
+                                                {% set category_link = display.category.enabled == 'link' %}
+                                                <span class="g-array-item-category">
+                                                    {% set cat = article.categories|last %}
+                                                    {% if category_link %}
+                                                        <a href="{{ cat.route }}">
+                                                            <i class="fa fa-folder-open" aria-hidden="true"></i>{{ cat.title }}
+                                                        </a>
+                                                    {% else %}
+                                                        <i class="fa fa-folder-open" aria-hidden="true"></i>{{ cat.title }}
+                                                    {% endif %}
+                                                </span>
+                                            {% endif %}
+
+                                            {% if display.hits.enabled %}
+                                                <span class="g-array-item-hits">
+                                                    <i class="fa fa-eye" aria-hidden="true"></i>{{ article.hits }}
+                                                </span>
+                                            {% endif %}
+                                        </div>
+                                    {% endif %}
+
+                                    {# TEXT #}
+                                    {% if order_text == pos and display.text.type %}
+                                        {% set article_text = display.text.type == 'intro' ? display.text.prepare ? article.preparedIntroText : article.introtext : display.text.prepare ? article.preparedText : article.text %}
+                                        <div class="g-array-item-text">
+                                            {% if display.text.formatting == 'text' %}
+                                                {{ article_text|truncate_text(display.text.limit)|raw }}
+                                            {% else %}
+                                                {{ article_text|truncate_html(display.text.limit)|raw }}
+                                            {% endif %}
+                                        </div>
+                                    {% endif %}
+
+                                    {# READ MORE #}
+                                    {% if order_readmore == pos and display.read_more.enabled %}
+                                        <div class="g-array-item-read-more">
+                                            <a href="{{ article.route }}" class="button{% if display.read_more.css %} {{ display.read_more.css }}{% endif %}">
+                                                {{ display.read_more.label|default('Read More...') }}
                                             </a>
                                         </div>
                                     {% endif %}
-                                {% endif %}
-
-                                {% if display.title.enabled %}
-                                    <div class="g-array-item-title">
-                                        <h3 class="g-item-title">
-                                            <a href="{{ article.route }}">
-                                                {{ display.title.limit ? article.title|truncate_text(display.title.limit) : article.title }}
-                                            </a>
-                                        </h3>
-                                    </div>
-                                {% endif %}
-
-                                {% if display.date.enabled or display.author.enabled or display.category.enabled or display.hits.enabled %}
-                                    <div class="g-array-item-details">
-                                        {% if display.date.enabled %}
-                                            <span class="g-array-item-date">
-                                                {% if display.date.enabled == 'published' %}
-                                                    <i class="far fa-clock" aria-hidden="true"></i>{{ article.publish_up|date(display.date.format) }}
-                                                {% elseif display.date.enabled == 'modified' %}
-                                                    <i class="far fa-clock" aria-hidden="true"></i>{{ article.modified|date(display.date.format) }}
-                                                {% else %}
-                                                    <i class="far fa-clock" aria-hidden="true"></i>{{ article.created|date(display.date.format) }}
-                                                {% endif %}
-                                            </span>
-                                        {% endif %}
-
-                                        {% if display.author.enabled %}
-                                            <span class="g-array-item-author">
-                                                <i class="fa fa-user" aria-hidden="true"></i>{{ article.author.name }}
-                                            </span>
-                                        {% endif %}
-
-                                        {% if display.category.enabled %}
-                                            {% set category_link = display.category.enabled == 'link' %}
-                                            <span class="g-array-item-category">
-                                                {% set cat = article.categories|last %}
-                                                {% if category_link %}
-                                                    <a href="{{ cat.route }}">
-                                                        <i class="fa fa-folder-open" aria-hidden="true"></i>{{ cat.title }}
-                                                    </a>
-                                                {% else %}
-                                                    <i class="fa fa-folder-open" aria-hidden="true"></i>{{ cat.title }}
-                                                {% endif %}
-                                            </span>
-                                        {% endif %}
-
-                                        {% if display.hits.enabled %}
-                                            <span class="g-array-item-hits">
-                                                <i class="fa fa-eye" aria-hidden="true"></i>{{ article.hits }}
-                                            </span>
-                                        {% endif %}
-                                    </div>
-                                {% endif %}
-
-                                {% if display.text.type %}
-                                    {% set article_text = display.text.type == 'intro' ? display.text.prepare ? article.preparedIntroText : article.introtext : display.text.prepare ? article.preparedText : article.text %}
-                                    <div class="g-array-item-text">
-                                        {% if display.text.formatting == 'text' %}
-                                            {{ article_text|truncate_text(display.text.limit)|raw }}
-                                        {% else %}
-                                            {{ article_text|truncate_html(display.text.limit)|raw }}
-                                        {% endif %}
-                                    </div>
-                                {% endif %}
-
-                                {% if display.read_more.enabled %}
-                                    <div class="g-array-item-read-more">
-                                        <a href="{{ article.route }}" class="button{% if display.read_more.css %} {{ display.read_more.css }}{% endif %}">
-                                            {{ display.read_more.label|default('Read More...') }}
-                                        </a>
-                                    </div>
-                                {% endif %}
+                                {% endfor %}
                             </div>
                         </div>
                     </div>
@@ -152,11 +241,28 @@
                 {% endfor %}
             </div>
         {% endfor %}
+        </div>
 
-        {% if total > limit.total and display.pagination_buttons %}
+        {% if is_pagination and total > limit.total %}
             <div class="g-content-array-pagination">
                 <button class="button float-left contentarray-button pagination-button pagination-button-prev" data-id="{{ id }}" data-start="{{ max(0, start - limit.total|int|default(2)) }}"{{ start - limit.total|int|default(2) < 0 ? ' disabled' }}>{{ 'GANTRY5_ENGINE_PREV'|trans }}</button>
                 <button class="button float-right contentarray-button pagination-button pagination-button-next" data-id="{{ id }}" data-start="{{ start + limit.total|int|default(2) }}"{{ start + limit.total|int|default(2) >= total ? ' disabled' }}>{{ 'GANTRY5_ENGINE_NEXT'|trans }}</button>
+                <div class="clearfix"></div>
+            </div>
+        {% endif %}
+
+        {% if is_loadmore and (has_more or has_end) %}
+            <div class="g-content-array-loadmore">
+                {% if has_more %}
+                <button class="button contentarray-loadmore-button" data-id="{{ id }}" data-next="{{ (start - (limit.start|default(0)|int) + effective_limit) }}" data-step="{{ load_more_step }}" data-total="{{ total }}" data-loading="{{ load_more_loading|e }}">{{ load_more_label }}</button>
+                {% endif %}
+                {% if has_end %}
+                <div class="g-content-array-loadmore-end"{% if has_more %} style="display:none;"{% endif %}>
+                    {% if load_more_archive_label and load_more_archive_url %}
+                    <a class="button contentarray-archive-button" href="{{ load_more_archive_url|e }}">{{ load_more_archive_label }}</a>
+                    {% endif %}
+                </div>
+                {% endif %}
                 <div class="clearfix"></div>
             </div>
         {% endif %}
@@ -164,7 +270,7 @@
 {% endblock %}
 
 {% block javascript_footer %}
-{% if total > limit.total and display.pagination_buttons %}
+{% if is_pagination and total > limit.total %}
 {% do gantry.load('jquery') %}
 <script>
     (function ($) {
@@ -194,6 +300,80 @@
                 error: function(response) {
                     // TODO: Improve error handling -- instead of replacing particle content, display flash message or something...
                     $('#' + this.indexValue).html('AJAX FAILED ON ERROR');
+                }
+            });
+            return false;
+        });
+    })(jQuery)
+</script>
+{% endif %}
+{% if is_loadmore and total > limit.total %}
+{% do gantry.load('jquery') %}
+<script>
+    (function ($) {
+        $(document).on('click', 'button.contentarray-loadmore-button', function () {
+            var $btn = $(this),
+                $scope = $btn.closest('.g-content-array'),
+                $items = $scope.find('.g-content-array-items'),
+                $end = $scope.find('.g-content-array-loadmore-end'),
+                id = $btn.attr('data-id'),
+                next = parseInt($btn.attr('data-next'), 10) || 0,
+                step = parseInt($btn.attr('data-step'), 10) || 1,
+                total = parseInt($btn.attr('data-total'), 10) || 0,
+                originalLabel = $btn.text(),
+                loadingLabel = $btn.attr('data-loading') || 'Loading...',
+                request = {
+                    'option' : 'com_ajax',
+                    'plugin' : 'particle',
+                    'Itemid' : {{ gantry.page.itemid|int }},
+                    'id'     : id,
+                    'start'  : next,
+                    'limit'  : step,
+                    'format' : 'json'
+                };
+            if ($btn.prop('disabled')) {
+                return false;
+            }
+            $btn.prop('disabled', true).text(loadingLabel);
+            $.ajax({
+                type : 'GET',
+                data : request,
+                success: function (response) {
+                    var html = response && response.data ? response.data[0].html : null;
+                    if (!html) {
+                        $btn.prop('disabled', false).text(originalLabel);
+                        return;
+                    }
+                    var $parsed = $('<div>').html(html),
+                        $grids = $parsed.find('.g-grid');
+                    if (!$grids.length) {
+                        $grids = $parsed.find('.g-content-array-items').children();
+                    }
+                    var count = $grids.find('.g-array-item').length;
+                    if (!count) {
+                        count = $grids.filter('.g-array-item').length;
+                        if (count) {
+                            $items.append($grids);
+                        }
+                    } else {
+                        $items.append($grids);
+                    }
+                    if (!count) {
+                        $btn.hide();
+                        $end.show();
+                        return;
+                    }
+                    next += count;
+                    $btn.attr('data-next', next);
+                    if (next >= total) {
+                        $btn.hide();
+                        $end.show();
+                    } else {
+                        $btn.prop('disabled', false).text(originalLabel);
+                    }
+                },
+                error: function () {
+                    $btn.prop('disabled', false).text(originalLabel);
                 }
             });
             return false;
