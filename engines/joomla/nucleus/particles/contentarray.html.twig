@@ -42,6 +42,17 @@
     {% do article_finder.where('a.publish_up', '>=', cutoff) %}
 {% endif %}
 
+{# Exclude articles already shown by contentarray particles rendered earlier on the same page.
+   First rendered wins (layout order). Skipped with explicit article IDs and on AJAX reloads. #}
+{% set is_ajax_reload = ajax.start|default('') != '' or ajax.limit|default('') != '' %}
+{% set exclude_shown = filter.exclude_shown|default('') == 'show' and not has_explicit_articles and not is_ajax_reload %}
+{% if exclude_shown %}
+    {% set seen_ids = joomla.contentarraySeen() %}
+    {% if seen_ids is not empty %}
+        {% do article_finder.where('a.id', 'NOT IN', seen_ids) %}
+    {% endif %}
+{% endif %}
+
 {% set start = limit.start + max(0, ajax.start|int) %}
 
 {# Pagination mode: '' = hide, 'pagination' = Prev/Next (replace), 'loadmore' = append.
@@ -88,6 +99,15 @@
     {% set articles = [] %}
 {% else %}
     {% set articles = article_finder.find() %}
+{% endif %}
+{# Register rendered IDs so later contentarray particles can exclude them.
+   Always marked, even when this instance does not exclude or uses explicit IDs. #}
+{% if articles is not empty %}
+    {% set shown_ids = [] %}
+    {% for shown_article in articles %}
+        {% set shown_ids = shown_ids|merge([shown_article.id]) %}
+    {% endfor %}
+    {% do joomla.contentarrayMark(shown_ids) %}
 {% endif %}
 {% set has_more = (start + effective_limit) < total %}
 

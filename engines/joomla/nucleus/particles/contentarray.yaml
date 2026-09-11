@@ -62,6 +62,16 @@ form:
               min: 0
               overridable: false
 
+            article.filter.exclude_shown:
+              type: select.select
+              label: Exclude Already Shown
+              description: 'Exclude articles already rendered by other contentarray particles on the same page. First rendered particle wins (layout order). Applies to the initial page render only, not to Load More / Prev-Next calls. Skipped when explicit article IDs are set.'
+              default: ''
+              options:
+                show: Enabled
+                '': Disabled
+              overridable: false
+
             article.limit.total:
               type: input.number
               label: Number of Articles

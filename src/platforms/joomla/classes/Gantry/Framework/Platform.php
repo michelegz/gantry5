@@ -19,6 +19,7 @@ use Gantry\Component\Filesystem\Folder;
 use Gantry\Framework\Base\Platform as BasePlatform;
 use Gantry\Joomla\Category\CategoryFinder;
 use Gantry\Joomla\Content\Content;
+use Gantry\Joomla\Content\ContentArraySeen;
 use Gantry\Joomla\Content\ContentFinder;
 use Joomla\CMS\Application\CMSApplication;
 use Joomla\CMS\Document\HtmlDocument;
@@ -632,6 +633,29 @@ class Platform extends BasePlatform
         }
 
         return null;
+    }
+
+    /**
+     * IDs already rendered by contentarray particles in the current request.
+     *
+     * First rendered particle wins (layout order).
+     *
+     * @return int[]
+     */
+    public function contentarraySeen()
+    {
+        return ContentArraySeen::get();
+    }
+
+    /**
+     * Register article IDs as rendered by a contentarray particle.
+     *
+     * @param int|int[] $ids
+     * @return int[]
+     */
+    public function contentarrayMark($ids)
+    {
+        return ContentArraySeen::add($ids);
     }
 
     /**
