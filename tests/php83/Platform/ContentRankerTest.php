@@ -77,6 +77,19 @@ class ContentRankerTest extends MockableTest
         $this->assertSame([2, 3, 1], $ranked);
     }
 
+    public function testInfiniteScoresAreIgnored()
+    {
+        $merged = ContentRanker::mergeScoreMaps([
+            [1 => INF, 2 => 5.0, 3 => -INF, 4 => 'INF', 5 => 7]
+        ]);
+
+        $this->assertSame([2 => 5.0, 5 => 7], $merged);
+
+        $ranked = ContentRanker::sortRanked([1, 2, 3], [1 => INF, 2 => 5.0, 3 => 1.0]);
+
+        $this->assertSame([2, 3, 1], $ranked);
+    }
+
     public function testTiesKeepCandidateOrderNeverIdOrder()
     {
         // Descending IDs with equal scores must stay in candidate order:
@@ -98,5 +111,50 @@ class ContentRankerTest extends MockableTest
         $ranked = ContentRanker::sortRanked([8, 9], ['08' => 3, 9 => 1]);
 
         $this->assertSame([8, 9], $ranked);
+    }
+
+    public function testRichMapsMergeOnGrowth()
+    {
+        $merged = ContentRanker::mergeScoreMaps([
+            [1 => ['growth' => 2.5, 'delta' => 10], 2 => 7.0],
+            [1 => ['growth' => 3.0, 'delta' => 1], 3 => ['growth' => NAN, 'delta' => 5]],
+        ]);
+
+        $this->assertSame([1 => 3.0, 2 => 7.0], $merged);
+    }
+
+    public function testExtractDeltas()
+    {
+        $deltas = ContentRanker::extractDeltas([
+            [1 => ['growth' => 2.5, 'delta' => 10], 2 => 7.0, 3 => ['growth' => NAN, 'delta' => 5]],
+            [1 => ['growth' => 9.0, 'delta' => 2]],
+        ]);
+
+        $this->assertSame([1 => 10, 2 => 0], $deltas);
+    }
+
+    public function testDeltaBreaksGrowthTies()
+    {
+        // Same growth: higher delta first, then candidate order.
+        $ranked = ContentRanker::sortRanked(
+            [1, 2, 3, 4],
+            [1 => 5.0, 2 => 5.0, 3 => 5.0],
+            [1 => 1, 2 => 9, 3 => 4]
+        );
+
+        $this->assertSame([2, 3, 1, 4], $ranked);
+    }
+
+    public function testRichEndToEndOrdering()
+    {
+        $maps = [[1 => ['growth' => 1.0, 'delta' => 100], 2 => ['growth' => 2.0, 'delta' => 0]]];
+
+        $ranked = ContentRanker::sortRanked(
+            [1, 2, 3],
+            ContentRanker::mergeScoreMaps($maps),
+            ContentRanker::extractDeltas($maps)
+        );
+
+        $this->assertSame([2, 1, 3], $ranked);
     }
 }

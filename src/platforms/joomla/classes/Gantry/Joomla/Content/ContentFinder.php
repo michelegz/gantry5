@@ -62,13 +62,25 @@ class ContentFinder extends Finder
     }
 
     /**
+     * Maximum candidates evaluated in a single ranking pass. Bounds the
+     * dispatch payload, the plugin IN() list and the in-memory sort so a
+     * misconfigured listing can never hang the page.
+     */
+    const RANK_CANDIDATE_CAP = 5000;
+
+    /**
      * Find articles ordered by external ranking scores.
      *
      * Collects the candidate IDs after the configured filters, dispatches the
      * generic onContentRankIds event and orders the candidates by the merged
      * scores (highest first, stable, unscored appended at the end). Falls back
      * to publish_up ordering when no scores are provided or anything fails,
-     * so ranking listeners are always optional and nothing here is fatal.
+     * so ranking listeners are always optional and nothing here is fatal:
+     * this method never throws, it degrades to the default ordering instead.
+     *
+     * Append ?g5rankdebug=1 to the URL to trace the ranking pass without any
+     * log infrastructure: stages and timings are appended to
+     * {sys_temp_dir}/g5rank.log.
      *
      * @param int $limit
      * @param int $start
@@ -85,28 +97,87 @@ class ContentFinder extends Finder
             return Content::getInstances([], $this->readonly);
         }
 
-        $ids = array_values(array_map('intval', (array) $this->limit(0)->start(0)->find(false)));
+        $debug = defined('GANTRY_RANK_DEBUG')
+            ? (bool) constant('GANTRY_RANK_DEBUG')
+            : (!empty($_GET['g5rankdebug']));
+        $t0 = microtime(true);
+        $trace = static function ($stage, array $data = []) use ($debug, $t0) {
+            if (!$debug) {
+                return;
+            }
 
-        $scores = [];
-        if ($ids) {
+            $line = date('H:i:s') . ' +' . number_format((microtime(true) - $t0) * 1000, 1) . 'ms '
+                . $stage . ($data ? ' ' . json_encode($data) : '') . "\n";
+
+            @file_put_contents(sys_get_temp_dir() . '/g5rank.log', $line, FILE_APPEND);
+        };
+
+        try {
+            $ids = array_values(array_map('intval', (array) $this->limit(0)->start(0)->find(false)));
+            $trace('candidates', ['count' => count($ids)]);
+
+            if (count($ids) > static::RANK_CANDIDATE_CAP) {
+                $ids = array_slice($ids, 0, static::RANK_CANDIDATE_CAP);
+                $trace('candidates-capped', ['cap' => static::RANK_CANDIDATE_CAP]);
+            }
+
+            $scores = [];
+            $deltas = [];
+            if ($ids) {
+                try {
+                    // Ranking requires the Joomla 4+ event system. On older
+                    // platforms (e.g. Joomla 3) fall back silently to the
+                    // default ordering instead of fataling.
+                    if (!class_exists('Joomla\CMS\Event\AbstractEvent') || !class_exists('Gantry\Joomla\Content\ContentRankEvent')) {
+                        $scores = [];
+                    } else {
+                        $app = Factory::getApplication();
+                        $dispatcher = method_exists($app, 'getDispatcher') ? $app->getDispatcher() : null;
+                        if ($dispatcher && is_callable([$dispatcher, 'dispatch'])) {
+                            $trace('pre-event');
+                            $event = new ContentRankEvent($ids, $context);
+                            $trace('pre-dispatch');
+                            $dispatcher->dispatch('onContentRankIds', $event);
+                            $trace('post-dispatch');
+                            $scores = $event->getScores();
+                            $deltas = $event->getDeltas();
+                        } else {
+                            $scores = [];
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    $trace('dispatch-error', ['error' => get_class($e) . ': ' . $e->getMessage()]);
+                    $scores = [];
+                    $deltas = [];
+                }
+            }
+            $trace('scores', ['count' => count($scores)]);
+
+            if (!$scores) {
+                $trace('fallback');
+                $fallback = strtoupper((string) $direction) === 'ASC' ? 'ASC' : 'DESC';
+
+                return $this->order('publish_up', $fallback)->limit($limit)->start($start)->find();
+            }
+
+            $slice = array_slice(ContentRanker::sortRanked($ids, $scores, $deltas), $start, $limit);
+            $trace('sorted', ['slice' => count($slice)]);
+
+            $result = Content::getInstances($slice, $this->readonly);
+            $trace('done');
+
+            return $result;
+        } catch (\Throwable $e) {
+            $trace('fatal-fallback', ['error' => get_class($e) . ': ' . $e->getMessage()]);
+
             try {
-                $event = new ContentRankEvent($ids, $context);
-                Factory::getApplication()->getDispatcher()->dispatch('onContentRankIds', $event);
-                $scores = $event->getScores();
-            } catch (\Throwable $e) {
-                $scores = [];
+                $fallback = strtoupper((string) $direction) === 'ASC' ? 'ASC' : 'DESC';
+
+                return $this->order('publish_up', $fallback)->limit($limit)->start($start)->find();
+            } catch (\Throwable $e2) {
+                return Content::getInstances([], $this->readonly);
             }
         }
-
-        if (!$scores) {
-            $fallback = strtoupper((string) $direction) === 'ASC' ? 'ASC' : 'DESC';
-
-            return $this->order('publish_up', $fallback)->limit($limit)->start($start)->find();
-        }
-
-        $slice = array_slice(ContentRanker::sortRanked($ids, $scores), $start, $limit);
-
-        return Content::getInstances($slice, $this->readonly);
     }
 
     /**
