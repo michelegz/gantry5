@@ -24,8 +24,9 @@ class ContentRanker
     /**
      * Merge score maps from any number of responders into id => score.
      *
-     * Keys are normalized to positive integers, non numeric scores are
-     * ignored and on duplicates the highest score wins.
+     * Keys are normalized to positive integers, non numeric and non finite
+     * scores (e.g. NaN, which would poison the sort) are ignored and on
+     * duplicates the highest score wins.
      *
      * @param array $maps List of id => score maps.
      * @return array<int, int|float>
@@ -47,6 +48,10 @@ class ContentRanker
                 }
 
                 $score = $score + 0;
+
+                if (is_nan($score)) {
+                    continue;
+                }
 
                 if (!isset($scores[$id]) || $score > $scores[$id]) {
                     $scores[$id] = $score;
@@ -96,11 +101,11 @@ class ContentRanker
             if ($b[1] === null) {
                 return -1;
             }
-            if ($a[1] == $b[1]) {
-                return $a[2] <=> $b[2];
-            }
 
-            return $b[1] <=> $a[1];
+            // Always numeric: string comparison would order 1-11-2-12.
+            $compared = (float) $b[1] <=> (float) $a[1];
+
+            return $compared !== 0 ? $compared : ($a[2] <=> $b[2]);
         });
 
         return array_map(static function ($row) {

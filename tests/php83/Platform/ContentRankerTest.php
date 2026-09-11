@@ -52,4 +52,28 @@ class ContentRankerTest extends MockableTest
         $this->assertSame([1, 2], ContentRanker::sortRanked([1, 2], []));
         $this->assertSame([], ContentRanker::mergeScoreMaps([]));
     }
+
+    public function testFloatScoresSortNumericallyNotLexicographically()
+    {
+        // String comparison would order "11.25" < "2.0" < "9.5".
+        $ranked = ContentRanker::sortRanked([1, 2, 3], [1 => 9.5, 2 => 11.25, 3 => 2.0]);
+
+        $this->assertSame([2, 1, 3], $ranked);
+    }
+
+    public function testNumericStringScoresSortNumerically()
+    {
+        // String comparison would order "11" < "12" < "2" < "9.5".
+        $ranked = ContentRanker::sortRanked([1, 2, 3, 4], [1 => '9.5', 2 => '11', 3 => '12', 4 => '2']);
+
+        $this->assertSame([3, 2, 1, 4], $ranked);
+    }
+
+    public function testNanScoresAreIgnored()
+    {
+        // NaN would poison the sort, the ID ends up unscored instead.
+        $ranked = ContentRanker::sortRanked([1, 2, 3], [1 => NAN, 2 => 5.0, 3 => 1.0]);
+
+        $this->assertSame([2, 3, 1], $ranked);
+    }
 }
