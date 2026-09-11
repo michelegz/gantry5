@@ -45,58 +45,17 @@
     {% do article_finder.where('a.publish_up', '>=', cutoff) %}
 {% endif %}
 
-{# Exclude articles already shown by contentarray particles rendered earlier on the same page.
-   First rendered wins (layout order). Skipped with explicit article IDs and on AJAX reloads. #}
-{% set is_ajax_reload = ajax.start|default('') != '' or ajax.limit|default('') != '' %}
-{% set exclude_shown = filter.exclude_shown|default('') == 'show' and not has_explicit_articles and not is_ajax_reload %}
-{% if exclude_shown %}
-    {% set seen_ids = joomla.contentarraySeen() %}
-    {% if seen_ids is not empty %}
-        {% do article_finder.where('a.id', 'NOT IN', seen_ids) %}
-    {% endif %}
-{% endif %}
-
-{# Load More exclusion: AJAX calls forward the IDs already rendered on the page
-   (see data-exclude-shown on the button) so appended batches never repeat them.
-   Prev/Next keeps offset paging and is intentionally untouched. The list is
-   bounded for URL safety and sanitized to positive ints; explicit article IDs
-   opt out, same as the initial render. #}
-{% set shown_ids = [] %}
-{% set raw_shown = ajax.shown|default('') %}
-{% if is_loadmore and not has_explicit_articles and raw_shown is not iterable and raw_shown|trim != '' %}
-    {% for raw_shown_id in raw_shown|split(',')|slice(0, 2000) %}
-        {% set clean_shown_id = raw_shown_id|trim|int %}
-        {% if clean_shown_id > 0 %}
-            {% set shown_ids = shown_ids|merge([clean_shown_id]) %}
-        {% endif %}
-    {% endfor %}
-{% endif %}
-{% if shown_ids is not empty %}
-    {% do article_finder.where('a.id', 'NOT IN', shown_ids) %}
-{% endif %}
-{# With an exclusion list the query pages by exclusion (offset 0): start-based
-   offsets would double-skip. `start` is still the cumulative counter used for
-   the load-more max cap and has_more math below. #}
-{% set query_start = shown_ids is not empty ? 0 : start %}
-
-{# Exclude the article currently being viewed (article view only, 0 elsewhere).
-   On AJAX reloads there is no article context, so the ID is forwarded by the buttons. #}
-{% set current_id = ajax.current|default(0)|int %}
-{% if current_id <= 0 %}
-    {% set current_id = joomla.currentArticleId()|default(0)|int %}
-{% endif %}
-{% if filter.exclude_current|default('') == 'show' and current_id > 0 %}
-    {% do article_finder.where('a.id', 'NOT IN', [current_id]) %}
-{% endif %}
-
-{% set start = limit.start|default(0)|int + max(0, ajax.start|default(0)|int) %}
-
 {# Pagination mode: '' = hide, 'pagination' = Prev/Next (replace), 'loadmore' = append.
-   'show' is the legacy value and is treated as 'pagination' for backward compatibility. #}
+   'show' is the legacy value and is treated as 'pagination' for backward compatibility.
+   Defined first: everything below (exclusion parsing, query_start, limits) depends on it. #}
 {% set raw_pagination = display.pagination_buttons|default('') %}
 {% set pagination_mode = raw_pagination == 'show' ? 'pagination' : raw_pagination %}
 {% set is_pagination = pagination_mode == 'pagination' %}
 {% set is_loadmore = pagination_mode == 'loadmore' %}
+
+{# Cumulative offset: configured start plus the AJAX offset forwarded by Prev/Next/Load More.
+   Defined before query_start so AJAX batches actually advance instead of re-reading page 0. #}
+{% set start = limit.start|default(0)|int + max(0, ajax.start|default(0)|int) %}
 
 {# Load More step: how many articles to append per click. Falls back to limit.total. #}
 {% set load_more_step = article_settings.limit.load_more_step|default(limit.total)|int %}
@@ -122,6 +81,51 @@
         {% set effective_limit = remaining %}
     {% endif %}
 {% endif %}
+
+{# Exclude articles already shown by contentarray particles rendered earlier on the same page.
+   First rendered wins (layout order). Skipped with explicit article IDs and on AJAX reloads. #}
+{% set is_ajax_reload = ajax.start|default('') != '' or ajax.limit|default('') != '' %}
+{% set exclude_shown = filter.exclude_shown|default('') == 'show' and not has_explicit_articles and not is_ajax_reload %}
+{% if exclude_shown %}
+    {% set seen_ids = joomla.contentarraySeen() %}
+    {% if seen_ids is not empty %}
+        {% do article_finder.where('a.id', 'NOT IN', seen_ids) %}
+    {% endif %}
+{% endif %}
+
+{# Load More exclusion: AJAX calls forward the IDs already rendered on the page
+   (see data-exclude-shown on the button) so appended batches never repeat them.
+   Prev/Next keeps offset paging and is intentionally untouched. The list is
+   bounded for URL safety and sanitized to positive ints; explicit article IDs
+   opt out, same as the initial render. #}
+{% set excluded_ids = [] %}
+{% set raw_shown = ajax.shown|default('') %}
+{% if is_loadmore and not has_explicit_articles and raw_shown is not iterable and raw_shown|trim != '' %}
+    {% for raw_shown_id in raw_shown|split(',')|slice(0, 2000) %}
+        {% set clean_shown_id = raw_shown_id|trim|int %}
+        {% if clean_shown_id > 0 %}
+            {% set excluded_ids = excluded_ids|merge([clean_shown_id]) %}
+        {% endif %}
+    {% endfor %}
+{% endif %}
+{% if excluded_ids is not empty %}
+    {% do article_finder.where('a.id', 'NOT IN', excluded_ids) %}
+{% endif %}
+{# With an exclusion list the query pages by exclusion (offset 0): start-based
+   offsets would double-skip. `start` is still the cumulative counter used for
+   the load-more max cap and has_more math below. #}
+{% set exclusion_active = excluded_ids is not empty %}
+{% set query_start = exclusion_active ? 0 : start %}
+
+{# Exclude the article currently being viewed (article view only, 0 elsewhere).
+   On AJAX reloads there is no article context, so the ID is forwarded by the buttons. #}
+{% set current_id = ajax.current|default(0)|int %}
+{% if current_id <= 0 %}
+    {% set current_id = joomla.currentArticleId()|default(0)|int %}
+{% endif %}
+{% if filter.exclude_current|default('') == 'show' and current_id > 0 %}
+    {% do article_finder.where('a.id', 'NOT IN', [current_id]) %}
+{% endif %}
 {% if not is_ranking %}
 {% if is_hits_recent %}
     {% do article_finder.order('hits', sort.ordering|default('DESC')).limit(max(1, effective_limit)).start(query_start) %}
@@ -141,18 +145,20 @@
     {% set articles = article_finder.find() %}
 {% endif %}
 {# Register rendered IDs so later contentarray particles can exclude them.
-   Always marked, even when this instance does not exclude or uses explicit IDs. #}
+   Always marked, even when this instance does not exclude or uses explicit IDs.
+   Named rendered_ids (not excluded_ids) so the exclusion list above is preserved
+   for the has_more check below. #}
 {% if articles is not empty %}
-    {% set shown_ids = [] %}
+    {% set rendered_ids = [] %}
     {% for shown_article in articles %}
-        {% set shown_ids = shown_ids|merge([shown_article.id]) %}
+        {% set rendered_ids = rendered_ids|merge([shown_article.id]) %}
     {% endfor %}
-    {% do joomla.contentarrayMark(shown_ids) %}
+    {% do joomla.contentarrayMark(rendered_ids) %}
 {% endif %}
 {# has_more: offset paging compares against the window end; exclusion paging
    (shown list) compares the remaining pool against the batch size, capped by
    load_more_max when set. #}
-{% if shown_ids is not empty %}
+{% if exclusion_active %}
     {% set has_more = total > effective_limit and (load_more_max <= 0 or (start + effective_limit) < load_more_max) %}
 {% else %}
     {% set has_more = (start + effective_limit) < total %}
