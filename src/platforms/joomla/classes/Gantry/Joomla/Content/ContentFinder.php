@@ -78,10 +78,6 @@ class ContentFinder extends Finder
      * so ranking listeners are always optional and nothing here is fatal:
      * this method never throws, it degrades to the default ordering instead.
      *
-     * Append ?g5rankdebug=1 to the URL to trace the ranking pass without any
-     * log infrastructure: stages and timings are appended to
-     * {sys_temp_dir}/g5rank.log.
-     *
      * @param int $limit
      * @param int $start
      * @param string $direction Ordering direction used for the fallback.
@@ -97,28 +93,11 @@ class ContentFinder extends Finder
             return Content::getInstances([], $this->readonly);
         }
 
-        $debug = defined('GANTRY_RANK_DEBUG')
-            ? (bool) constant('GANTRY_RANK_DEBUG')
-            : (!empty($_GET['g5rankdebug']));
-        $t0 = microtime(true);
-        $trace = static function ($stage, array $data = []) use ($debug, $t0) {
-            if (!$debug) {
-                return;
-            }
-
-            $line = date('H:i:s') . ' +' . number_format((microtime(true) - $t0) * 1000, 1) . 'ms '
-                . $stage . ($data ? ' ' . json_encode($data) : '') . "\n";
-
-            @file_put_contents(sys_get_temp_dir() . '/g5rank.log', $line, FILE_APPEND);
-        };
-
         try {
             $ids = array_values(array_map('intval', (array) $this->limit(0)->start(0)->find(false)));
-            $trace('candidates', ['count' => count($ids)]);
 
             if (count($ids) > static::RANK_CANDIDATE_CAP) {
                 $ids = array_slice($ids, 0, static::RANK_CANDIDATE_CAP);
-                $trace('candidates-capped', ['cap' => static::RANK_CANDIDATE_CAP]);
             }
 
             $scores = [];
@@ -134,11 +113,8 @@ class ContentFinder extends Finder
                         $app = Factory::getApplication();
                         $dispatcher = method_exists($app, 'getDispatcher') ? $app->getDispatcher() : null;
                         if ($dispatcher && is_callable([$dispatcher, 'dispatch'])) {
-                            $trace('pre-event');
                             $event = new ContentRankEvent($ids, $context);
-                            $trace('pre-dispatch');
                             $dispatcher->dispatch('onContentRankIds', $event);
-                            $trace('post-dispatch');
                             $scores = $event->getScores();
                             $deltas = $event->getDeltas();
                         } else {
@@ -146,30 +122,21 @@ class ContentFinder extends Finder
                         }
                     }
                 } catch (\Throwable $e) {
-                    $trace('dispatch-error', ['error' => get_class($e) . ': ' . $e->getMessage()]);
                     $scores = [];
                     $deltas = [];
                 }
             }
-            $trace('scores', ['count' => count($scores)]);
 
             if (!$scores) {
-                $trace('fallback');
                 $fallback = strtoupper((string) $direction) === 'ASC' ? 'ASC' : 'DESC';
 
                 return $this->order('publish_up', $fallback)->limit($limit)->start($start)->find();
             }
 
             $slice = array_slice(ContentRanker::sortRanked($ids, $scores, $deltas), $start, $limit);
-            $trace('sorted', ['slice' => count($slice)]);
 
-            $result = Content::getInstances($slice, $this->readonly);
-            $trace('done');
-
-            return $result;
+            return Content::getInstances($slice, $this->readonly);
         } catch (\Throwable $e) {
-            $trace('fatal-fallback', ['error' => get_class($e) . ': ' . $e->getMessage()]);
-
             try {
                 $fallback = strtoupper((string) $direction) === 'ASC' ? 'ASC' : 'DESC';
 
