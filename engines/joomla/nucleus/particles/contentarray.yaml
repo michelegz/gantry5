@@ -181,7 +181,7 @@ form:
             _note_advanced:
               type: separator.note
               class: alert alert-info
-              content: 'Extra filters and display options. They apply on top of the Articles and Display tabs.'
+              content: 'Extra filters. They apply on top of the Articles tab.'
 
             article.filter.recent_days:
               type: input.number
@@ -210,15 +210,6 @@ form:
                 show: Enabled
                 '': Disabled
               overridable: false
-
-            article.display.title.overlay:
-              type: select.select
-              label: Title Overlay on Image
-              description: "If enabled, the image becomes the background of a container that holds the title. The link covers the whole container, so you can style an overlay background via CSS."
-              default: ''
-              options:
-                show: Enabled
-                '': Disabled
 
         _tab_display:
           label: Display
@@ -379,6 +370,15 @@ form:
               type: separator.note
               class: alert alert-info
               content: 'Choose in which order the blocks (Image / Title, Details, Text, Read More) are rendered inside each article. Use 1-5. If Title Overlay is enabled, Image and Title are rendered together at the Image position.'
+
+            article.display.title.overlay:
+              type: select.select
+              label: Title Overlay on Image
+              description: "If enabled, the image becomes the background of a container that holds the title. The link covers the whole container, so you can style an overlay background via CSS."
+              default: ''
+              options:
+                show: Enabled
+                '': Disabled
 
             article.display.ordering.image:
               type: select.select
