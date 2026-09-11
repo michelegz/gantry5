@@ -53,6 +53,16 @@
     {% endif %}
 {% endif %}
 
+{# Exclude the article currently being viewed (article view only, 0 elsewhere).
+   On AJAX reloads there is no article context, so the ID is forwarded by the buttons. #}
+{% set current_id = ajax.current|default(0)|int %}
+{% if current_id <= 0 %}
+    {% set current_id = joomla.currentArticleId()|default(0)|int %}
+{% endif %}
+{% if filter.exclude_current|default('') == 'show' and current_id > 0 %}
+    {% do article_finder.where('a.id', 'NOT IN', [current_id]) %}
+{% endif %}
+
 {% set start = limit.start + max(0, ajax.start|int) %}
 
 {# Pagination mode: '' = hide, 'pagination' = Prev/Next (replace), 'loadmore' = append.
@@ -265,8 +275,8 @@
 
         {% if is_pagination and total > limit.total %}
             <div class="g-content-array-pagination">
-                <button class="button float-left contentarray-button pagination-button pagination-button-prev" data-id="{{ id }}" data-start="{{ max(0, start - limit.total|int|default(2)) }}"{{ start - limit.total|int|default(2) < 0 ? ' disabled' }}>{{ 'GANTRY5_ENGINE_PREV'|trans }}</button>
-                <button class="button float-right contentarray-button pagination-button pagination-button-next" data-id="{{ id }}" data-start="{{ start + limit.total|int|default(2) }}"{{ start + limit.total|int|default(2) >= total ? ' disabled' }}>{{ 'GANTRY5_ENGINE_NEXT'|trans }}</button>
+                <button class="button float-left contentarray-button pagination-button pagination-button-prev" data-id="{{ id }}" data-start="{{ max(0, start - limit.total|int|default(2)) }}" data-current="{{ current_id }}"{{ start - limit.total|int|default(2) < 0 ? ' disabled' }}>{{ 'GANTRY5_ENGINE_PREV'|trans }}</button>
+                <button class="button float-right contentarray-button pagination-button pagination-button-next" data-id="{{ id }}" data-start="{{ start + limit.total|int|default(2) }}" data-current="{{ current_id }}"{{ start + limit.total|int|default(2) >= total ? ' disabled' }}>{{ 'GANTRY5_ENGINE_NEXT'|trans }}</button>
                 <div class="clearfix"></div>
             </div>
         {% endif %}
@@ -274,7 +284,7 @@
         {% if is_loadmore and (has_more or has_end) %}
             <div class="g-content-array-loadmore">
                 {% if has_more %}
-                <button class="button contentarray-loadmore-button" data-id="{{ id }}" data-next="{{ (start - (limit.start|default(0)|int) + effective_limit) }}" data-step="{{ load_more_step }}" data-total="{{ total }}" data-loading="{{ load_more_loading|e }}">{{ load_more_label }}</button>
+                <button class="button contentarray-loadmore-button" data-id="{{ id }}" data-next="{{ (start - (limit.start|default(0)|int) + effective_limit) }}" data-step="{{ load_more_step }}" data-total="{{ total }}" data-current="{{ current_id }}" data-loading="{{ load_more_loading|e }}">{{ load_more_label }}</button>
                 {% endif %}
                 {% if has_end %}
                 <div class="g-content-array-loadmore-end"{% if has_more %} style="display:none;"{% endif %}>
@@ -297,12 +307,14 @@
         $(document).on('click', 'button.contentarray-button', function () {
             var id = $(this).attr('data-id'),
                 start = $(this).attr('data-start'),
+                current = $(this).attr('data-current') || 0,
                 request = {
                 'option' : 'com_ajax',
                 'plugin' : 'particle',
                 'Itemid' : {{ gantry.page.itemid|int }},
                 'id'     : id,
                 'start'  : start,
+                'current': current,
                 'format' : 'json'
             };
             $.ajax({
@@ -340,6 +352,7 @@
                 next = parseInt($btn.attr('data-next'), 10) || 0,
                 step = parseInt($btn.attr('data-step'), 10) || 1,
                 total = parseInt($btn.attr('data-total'), 10) || 0,
+                current = $btn.attr('data-current') || 0,
                 originalLabel = $btn.text(),
                 loadingLabel = $btn.attr('data-loading') || 'Loading...',
                 request = {
@@ -349,6 +362,7 @@
                     'id'     : id,
                     'start'  : next,
                     'limit'  : step,
+                    'current': current,
                     'format' : 'json'
                 };
             if ($btn.prop('disabled')) {

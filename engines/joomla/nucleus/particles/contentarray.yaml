@@ -72,6 +72,16 @@ form:
                 '': Disabled
               overridable: false
 
+            article.filter.exclude_current:
+              type: select.select
+              label: Exclude Current Article
+              description: 'Exclude the article currently being viewed (article view only, 0 elsewhere). Applies even with explicit article IDs. The ID is forwarded on Prev/Next and Load More calls.'
+              default: ''
+              options:
+                show: Enabled
+                '': Disabled
+              overridable: false
+
             article.limit.total:
               type: input.number
               label: Number of Articles

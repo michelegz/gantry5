@@ -659,6 +659,29 @@ class Platform extends BasePlatform
     }
 
     /**
+     * ID of the article currently being viewed, 0 when not on an article page.
+     *
+     * Note: on com_ajax calls (particle Prev/Next and Load More) there is no
+     * article context, so the ID is forwarded by the particle buttons instead.
+     *
+     * @return int
+     */
+    public function currentArticleId()
+    {
+        $app = Factory::getApplication();
+        if (!$app->isClient('site')) {
+            return 0;
+        }
+
+        $input = $app->input;
+        if ($input->getCmd('option') !== 'com_content' || $input->getCmd('view') !== 'article') {
+            return 0;
+        }
+
+        return $input->getInt('id', 0);
+    }
+
+    /**
      * @param string $text
      * @param int $length
      * @param bool $html
