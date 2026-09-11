@@ -410,14 +410,22 @@
                     'format' : 'json'
                 };
             if (excludeShown) {
+                // Collect rendered IDs from ALL contentarray particles on the page,
+                // not just this one: on the initial render exclude_shown covers
+                // every particle rendered before (via contentarraySeen), but an
+                // AJAX request is a fresh request with an empty Seen registry,
+                // so the client must forward the global list. Scoping to
+                // $scope here would let articles shown by other particles
+                // reappear in appended batches.
                 var seenIds = {};
-                $scope.find('.g-array-item[data-article-id]').each(function () {
+                $(document).find('.g-content-array .g-array-item[data-article-id]').each(function () {
                     var aid = parseInt($(this).attr('data-article-id'), 10) || 0;
                     if (aid > 0) {
                         seenIds[aid] = true;
                     }
                 });
-                var shown = Object.keys(seenIds).join(',');
+                // Bounded for URL safety, mirrors the server-side slice(0, 2000).
+                var shown = Object.keys(seenIds).slice(0, 2000).join(',');
                 if (shown) {
                     request.shown = shown;
                 }
