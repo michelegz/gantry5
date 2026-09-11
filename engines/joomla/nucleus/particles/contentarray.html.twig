@@ -34,6 +34,7 @@
 {# Recent-days filter on publish_up (configurable X). Uses the already public where() on Finder.
    Skipped when specific article IDs are selected: only those are shown in that case. #}
 {% set recent_days = filter.recent_days|default(0)|int %}
+{# Legacy: 'hits_recent' removed from UI options, still mapped to hits for saved configs. #}
 {% set is_hits_recent = sort.orderby == 'hits_recent' %}
 {% set has_explicit_articles = filter.articles|default('')|trim != '' %}
 {% if (recent_days > 0 or is_hits_recent) and not has_explicit_articles %}

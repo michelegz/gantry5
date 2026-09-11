@@ -54,34 +54,6 @@ form:
                 only: Only Featured
               overridable: false
 
-            article.filter.recent_days:
-              type: input.number
-              label: Recent Days Filter
-              description: 'Only include articles with publish_up in the last X days. 0 = no limit. Combine with Order By = Hits + DESC for "most viewed recently".'
-              default: 0
-              min: 0
-              overridable: false
-
-            article.filter.exclude_shown:
-              type: select.select
-              label: Exclude Already Shown
-              description: 'Exclude articles already rendered by other contentarray particles on the same page. First rendered particle wins (layout order). Applies to the initial page render only, not to Load More / Prev-Next calls. Skipped when explicit article IDs are set.'
-              default: ''
-              options:
-                show: Enabled
-                '': Disabled
-              overridable: false
-
-            article.filter.exclude_current:
-              type: select.select
-              label: Exclude Current Article
-              description: 'Exclude the article currently being viewed (article view only, 0 elsewhere). Applies even with explicit article IDs. The ID is forwarded on Prev/Next and Load More calls.'
-              default: ''
-              options:
-                show: Enabled
-                '': Disabled
-              overridable: false
-
             article.limit.total:
               type: input.number
               label: Number of Articles
@@ -135,7 +107,6 @@ form:
                 title: Title
                 ordering: Ordering
                 hits: Hits
-                hits_recent: Hits (last X days)
                 id: ID
                 alias: Alias
               overridable: false
@@ -203,6 +174,51 @@ form:
               default: ''
               overridable: false
 
+        _tab_advanced:
+          label: Advanced
+          fields:
+            _note_advanced:
+              type: separator.note
+              class: alert alert-info
+              content: 'Extra filters and display options. They apply on top of the Articles and Display tabs.'
+
+            article.filter.recent_days:
+              type: input.number
+              label: Recent Days Filter
+              description: 'Only include articles with publish_up in the last X days. 0 = no limit. Combine with Order By = Hits + DESC for "most viewed recently".'
+              default: 0
+              min: 0
+              overridable: false
+
+            article.filter.exclude_shown:
+              type: select.select
+              label: Exclude Already Shown
+              description: 'Exclude articles already rendered by other contentarray particles on the same page. First rendered particle wins (layout order). Applies to the initial page render only, not to Load More / Prev-Next calls. Skipped when explicit article IDs are set.'
+              default: ''
+              options:
+                show: Enabled
+                '': Disabled
+              overridable: false
+
+            article.filter.exclude_current:
+              type: select.select
+              label: Exclude Current Article
+              description: 'Exclude the article currently being viewed (article view only, 0 elsewhere). Applies even with explicit article IDs. The ID is forwarded on Prev/Next and Load More calls.'
+              default: ''
+              options:
+                show: Enabled
+                '': Disabled
+              overridable: false
+
+            article.display.title.overlay:
+              type: select.select
+              label: Title Overlay on Image
+              description: "If enabled, the image becomes the background of a container that holds the title. The link covers the whole container, so you can style an overlay background via CSS."
+              default: ''
+              options:
+                show: Enabled
+                '': Disabled
+
         _tab_display:
           label: Display
           fields:
@@ -267,15 +283,6 @@ form:
               label: Title Limit
               description: Enter the maximum number of characters the article title should be limited to.
               pattern: '\d+(\.\d+){0,1}'
-
-            article.display.title.overlay:
-              type: select.select
-              label: Title Overlay on Image
-              description: "If enabled, the image becomes the background of a container that holds the title. The link covers the whole container, so you can style an overlay background via CSS."
-              default: ''
-              options:
-                show: Enabled
-                '': Disabled
 
             article.display.date.enabled:
               type: select.select
