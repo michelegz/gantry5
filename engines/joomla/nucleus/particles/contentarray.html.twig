@@ -56,6 +56,29 @@
     {% endif %}
 {% endif %}
 
+{# Load More exclusion: AJAX calls forward the IDs already rendered on the page
+   (see data-exclude-shown on the button) so appended batches never repeat them.
+   Prev/Next keeps offset paging and is intentionally untouched. The list is
+   bounded for URL safety and sanitized to positive ints; explicit article IDs
+   opt out, same as the initial render. #}
+{% set shown_ids = [] %}
+{% set raw_shown = ajax.shown|default('') %}
+{% if is_loadmore and not has_explicit_articles and raw_shown is not iterable and raw_shown|trim != '' %}
+    {% for raw_shown_id in raw_shown|split(',')|slice(0, 2000) %}
+        {% set clean_shown_id = raw_shown_id|trim|int %}
+        {% if clean_shown_id > 0 %}
+            {% set shown_ids = shown_ids|merge([clean_shown_id]) %}
+        {% endif %}
+    {% endfor %}
+{% endif %}
+{% if shown_ids is not empty %}
+    {% do article_finder.where('a.id', 'NOT IN', shown_ids) %}
+{% endif %}
+{# With an exclusion list the query pages by exclusion (offset 0): start-based
+   offsets would double-skip. `start` is still the cumulative counter used for
+   the load-more max cap and has_more math below. #}
+{% set query_start = shown_ids is not empty ? 0 : start %}
+
 {# Exclude the article currently being viewed (article view only, 0 elsewhere).
    On AJAX reloads there is no article context, so the ID is forwarded by the buttons. #}
 {% set current_id = ajax.current|default(0)|int %}
@@ -66,7 +89,7 @@
     {% do article_finder.where('a.id', 'NOT IN', [current_id]) %}
 {% endif %}
 
-{% set start = limit.start + max(0, ajax.start|int) %}
+{% set start = limit.start|default(0)|int + max(0, ajax.start|default(0)|int) %}
 
 {# Pagination mode: '' = hide, 'pagination' = Prev/Next (replace), 'loadmore' = append.
    'show' is the legacy value and is treated as 'pagination' for backward compatibility. #}
@@ -101,9 +124,9 @@
 {% endif %}
 {% if not is_ranking %}
 {% if is_hits_recent %}
-    {% do article_finder.order('hits', sort.ordering|default('DESC')).limit(max(1, effective_limit)).start(start) %}
+    {% do article_finder.order('hits', sort.ordering|default('DESC')).limit(max(1, effective_limit)).start(query_start) %}
 {% else %}
-    {% do article_finder.order(sort.orderby, sort.ordering).limit(max(1, effective_limit)).start(start) %}
+    {% do article_finder.order(sort.orderby|default('publish_up'), sort.ordering|default('DESC')).limit(max(1, effective_limit)).start(query_start) %}
 {% endif %}
 {% endif %}
 {% set total = article_finder.count() %}
@@ -113,7 +136,7 @@
 {% if effective_limit <= 0 %}
     {% set articles = [] %}
 {% elseif is_ranking %}
-    {% set articles = article_finder.findRanked(effective_limit, start, sort.ordering|default('DESC')) %}
+    {% set articles = article_finder.findRanked(effective_limit, query_start, sort.ordering|default('DESC')) %}
 {% else %}
     {% set articles = article_finder.find() %}
 {% endif %}
@@ -126,7 +149,14 @@
     {% endfor %}
     {% do joomla.contentarrayMark(shown_ids) %}
 {% endif %}
-{% set has_more = (start + effective_limit) < total %}
+{# has_more: offset paging compares against the window end; exclusion paging
+   (shown list) compares the remaining pool against the batch size, capped by
+   load_more_max when set. #}
+{% if shown_ids is not empty %}
+    {% set has_more = total > effective_limit and (load_more_max <= 0 or (start + effective_limit) < load_more_max) %}
+{% else %}
+    {% set has_more = (start + effective_limit) < total %}
+{% endif %}
 
 {# Ordering positions (1-5), fallback to original order for backward compatibility #}
 {% set order_image = display.ordering.image|default(1)|int %}
@@ -152,7 +182,7 @@
 
                     <div class="g-block">
                         <div class="g-content">
-                            <div class="g-array-item">
+                            <div class="g-array-item" data-article-id="{{ article.id }}">
                                 {% if display.edit and article.edit %}
                                     {% if not joomla.checkVersion('4.0') %}
                                         <a class="g-array-item-edit" href="{{ article.edit }}">{{ 'COM_CONTENT_FORM_EDIT_ARTICLE'|trans }}</a>
@@ -291,7 +321,7 @@
         {% if is_loadmore and (has_more or has_end) %}
             <div class="g-content-array-loadmore">
                 {% if has_more %}
-                <button class="button contentarray-loadmore-button" data-id="{{ id }}" data-next="{{ (start - (limit.start|default(0)|int) + effective_limit) }}" data-step="{{ load_more_step }}" data-total="{{ total }}" data-current="{{ current_id }}" data-loading="{{ load_more_loading|e }}">{{ load_more_label }}</button>
+                <button class="button contentarray-loadmore-button" data-id="{{ id }}" data-next="{{ (start - (limit.start|default(0)|int) + effective_limit) }}" data-step="{{ load_more_step }}" data-total="{{ total }}" data-current="{{ current_id }}" data-loading="{{ load_more_loading|e }}" data-exclude-shown="{{ (filter.exclude_shown|default('') == 'show' and not has_explicit_articles) ? '1' : '0' }}">{{ load_more_label }}</button>
                 {% endif %}
                 {% if has_end %}
                 <div class="g-content-array-loadmore-end"{% if has_more %} style="display:none;"{% endif %}>
@@ -360,6 +390,7 @@
                 step = parseInt($btn.attr('data-step'), 10) || 1,
                 total = parseInt($btn.attr('data-total'), 10) || 0,
                 current = $btn.attr('data-current') || 0,
+                excludeShown = $btn.attr('data-exclude-shown') === '1',
                 originalLabel = $btn.text(),
                 loadingLabel = $btn.attr('data-loading') || 'Loading...',
                 request = {
@@ -372,6 +403,20 @@
                     'current': current,
                     'format' : 'json'
                 };
+            if (excludeShown) {
+                var seenIds = {};
+                $scope.find('.g-array-item[data-article-id]').each(function () {
+                    var aid = parseInt($(this).attr('data-article-id'), 10) || 0;
+                    if (aid > 0) {
+                        seenIds[aid] = true;
+                    }
+                });
+                var shown = Object.keys(seenIds).join(',');
+                if (shown) {
+                    request.shown = shown;
+                }
+            }
+            var exclusionActive = excludeShown && !!request.shown;
             if ($btn.prop('disabled')) {
                 return false;
             }
@@ -406,7 +451,17 @@
                     }
                     next += count;
                     $btn.attr('data-next', next);
-                    if (next >= total) {
+                    if (exclusionActive) {
+                        // Exclusion paging: the server returns from the remaining
+                        // pool, so a short batch means the pool is drained. The
+                        // shrinking server total must not hide the button early.
+                        if (count < step) {
+                            $btn.hide();
+                            $end.show();
+                        } else {
+                            $btn.prop('disabled', false).text(originalLabel);
+                        }
+                    } else if (next >= total) {
                         $btn.hide();
                         $end.show();
                     } else {
