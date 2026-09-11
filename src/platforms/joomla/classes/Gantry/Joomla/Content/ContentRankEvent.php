@@ -19,8 +19,9 @@ use Joomla\CMS\Event\AbstractEvent;
  * Generic extension point to rank content IDs from the outside.
  *
  * Dispatched as 'onContentRankIds' with the candidate IDs already filtered.
- * Any listener may contribute an id => score map via addScores(). Maps from
- * all listeners are merged with the highest score winning per ID, candidates
+ * Any listener may contribute an id => score map via addScores(). A single
+ * map passed as the 'scores' argument is accepted as well. Maps from all
+ * listeners are merged with the highest score winning per ID, candidates
  * are ordered by score descending in a stable way and candidates without a
  * score are appended at the end. When no scores are provided the caller falls
  * back to its default ordering, so listeners are always optional.
@@ -88,10 +89,20 @@ class ContentRankEvent extends AbstractEvent
     /**
      * Merged id => score map across all contributors.
      *
+     * Collects every map added via addScores() plus a single map passed
+     * as the 'scores' argument, so both shapes are accepted.
+     *
      * @return array<int, int|float>
      */
     public function getScores()
     {
-        return ContentRanker::mergeScoreMaps((array) $this->getArgument('results', []));
+        $maps = (array) $this->getArgument('results', []);
+        $single = $this->getArgument('scores', null);
+
+        if (is_array($single)) {
+            $maps[] = $single;
+        }
+
+        return ContentRanker::mergeScoreMaps($maps);
     }
 }

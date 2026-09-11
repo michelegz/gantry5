@@ -76,4 +76,27 @@ class ContentRankerTest extends MockableTest
 
         $this->assertSame([2, 3, 1], $ranked);
     }
+
+    public function testTiesKeepCandidateOrderNeverIdOrder()
+    {
+        // Descending IDs with equal scores must stay in candidate order:
+        // the ID itself is never an implicit tie-breaker.
+        $ranked = ContentRanker::sortRanked([11, 2, 7], [11 => 5.0, 2 => 5.0]);
+
+        $this->assertSame([11, 2, 7], $ranked);
+    }
+
+    public function testAllTiedKeepsCandidateOrder()
+    {
+        $ranked = ContentRanker::sortRanked([3, 1, 2], [3 => 1.5, 1 => 1.5, 2 => 1.5]);
+
+        $this->assertSame([3, 1, 2], $ranked);
+    }
+
+    public function testStringKeysAreCoercedToInt()
+    {
+        $ranked = ContentRanker::sortRanked([8, 9], ['08' => 3, 9 => 1]);
+
+        $this->assertSame([8, 9], $ranked);
+    }
 }
