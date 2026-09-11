@@ -36,6 +36,8 @@
 {% set recent_days = filter.recent_days|default(0)|int %}
 {# Legacy: 'hits_recent' removed from UI options, still mapped to hits for saved configs. #}
 {% set is_hits_recent = sort.orderby == 'hits_recent' %}
+{# Generic ranking delegated to listening plugins via the onContentRankIds event. #}
+{% set is_ranking = sort.orderby == 'ranking' %}
 {% set has_explicit_articles = filter.articles|default('')|trim != '' %}
 {% if (recent_days > 0 or is_hits_recent) and not has_explicit_articles %}
     {% set days = recent_days > 0 ? recent_days : 30 %}
@@ -97,10 +99,12 @@
         {% set effective_limit = remaining %}
     {% endif %}
 {% endif %}
+{% if not is_ranking %}
 {% if is_hits_recent %}
     {% do article_finder.order('hits', sort.ordering|default('DESC')).limit(max(1, effective_limit)).start(start) %}
 {% else %}
     {% do article_finder.order(sort.orderby, sort.ordering).limit(max(1, effective_limit)).start(start) %}
+{% endif %}
 {% endif %}
 {% set total = article_finder.count() %}
 {% if is_loadmore and load_more_max > 0 and total > load_more_max %}
@@ -108,6 +112,8 @@
 {% endif %}
 {% if effective_limit <= 0 %}
     {% set articles = [] %}
+{% elseif is_ranking %}
+    {% set articles = article_finder.findRanked(effective_limit, start, sort.ordering|default('DESC')) %}
 {% else %}
     {% set articles = article_finder.find() %}
 {% endif %}

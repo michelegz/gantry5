@@ -107,6 +107,7 @@ form:
                 title: Title
                 ordering: Ordering
                 hits: Hits
+                ranking: Ranking (plugins)
                 id: ID
                 alias: Alias
               overridable: false

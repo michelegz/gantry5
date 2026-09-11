@@ -62,6 +62,54 @@ class ContentFinder extends Finder
     }
 
     /**
+     * Find articles ordered by external ranking scores.
+     *
+     * Collects the candidate IDs after the configured filters, dispatches the
+     * generic onContentRankIds event and orders the candidates by the merged
+     * scores (highest first, stable, unscored appended at the end). Falls back
+     * to publish_up ordering when no scores are provided or anything fails,
+     * so ranking listeners are always optional and nothing here is fatal.
+     *
+     * @param int $limit
+     * @param int $start
+     * @param string $direction Ordering direction used for the fallback.
+     * @param string $context Fixed content scope passed to the event.
+     * @return Collection
+     */
+    public function findRanked($limit, $start, $direction = 'DESC', $context = 'com_content.articles')
+    {
+        $limit = max(0, (int) $limit);
+        $start = max(0, (int) $start);
+
+        if ($limit <= 0) {
+            return Content::getInstances([], $this->readonly);
+        }
+
+        $ids = array_values(array_map('intval', (array) $this->limit(0)->start(0)->find(false)));
+
+        $scores = [];
+        if ($ids) {
+            try {
+                $event = new ContentRankEvent($ids, $context);
+                Factory::getApplication()->getDispatcher()->dispatch('onContentRankIds', $event);
+                $scores = $event->getScores();
+            } catch (\Throwable $e) {
+                $scores = [];
+            }
+        }
+
+        if (!$scores) {
+            $fallback = strtoupper((string) $direction) === 'ASC' ? 'ASC' : 'DESC';
+
+            return $this->order('publish_up', $fallback)->limit($limit)->start($start)->find();
+        }
+
+        $slice = array_slice(ContentRanker::sortRanked($ids, $scores), $start, $limit);
+
+        return Content::getInstances($slice, $this->readonly);
+    }
+
+    /**
      * @param int|int[] $ids
      * @param bool $include
      * @return $this
