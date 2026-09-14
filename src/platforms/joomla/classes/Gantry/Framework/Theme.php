@@ -117,14 +117,56 @@ class Theme extends AbstractTheme
             return $date->format($format);
         }
 
-        if (!($date instanceof Date)) {
+        if ($date instanceof Date) {
+            if ($timezone) {
+                $date->setTimezone($timezone instanceof \DateTimeZone ? $timezone : new \DateTimeZone((string) $timezone));
+            }
+
+            return $date->format($format, true);
+        }
+
+        // Joomla stores DATETIME columns (created, modified, publish_up, publish_down) in UTC.
+        // Twig's twig_date_converter() would interpret a naive "Y-m-d H:i:s" string in the
+        // site timezone (see extendTwig(): CoreExtension::setTimezone($offset)), producing a
+        // timestamp shifted by the UTC offset. E.g. 10:00 UTC displayed as 10:00 Europe/Rome
+        // instead of 12:00. Detect that exact DB format and treat it as UTC, then convert to
+        // the target timezone -- same semantics as HTMLHelper::date($input, $format, true).
+        if (\is_string($date)) {
+            $trimmed = trim($date);
+            if ($trimmed === '' || str_starts_with($trimmed, '0000-00-00')) {
+                return '';
+            }
+            if (preg_match('/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?(\.\d+)?$/', $trimmed)) {
+                if ($timezone === false) {
+                    $target = new \DateTimeZone('UTC');
+                } elseif ($timezone instanceof \DateTimeZone) {
+                    $target = $timezone;
+                } elseif (\is_string($timezone) && $timezone !== '') {
+                    try {
+                        $target = new \DateTimeZone($timezone);
+                    } catch (\Exception $e) {
+                        $target = $env->getExtension(CoreExtension::class)->getTimezone();
+                    }
+                } else {
+                    $target = $env->getExtension(CoreExtension::class)->getTimezone();
+                }
+                if (!($target instanceof \DateTimeZone)) {
+                    $target = new \DateTimeZone('UTC');
+                }
+
+                $jdate = new Date($trimmed, new \DateTimeZone('UTC'));
+                $jdate->setTimezone($target);
+
+                return $jdate->format($format, true);
+            }
+        }
+
+        {
             // Create localized Date object.
             $twig_date = \twig_date_converter($env, $date, $timezone);
 
             $date = new Date($twig_date->getTimestamp());
             $date->setTimezone($twig_date->getTimezone());
-        } elseif ($timezone) {
-            $date->setTimezone($timezone);
         }
 
         return $date->format($format, true);

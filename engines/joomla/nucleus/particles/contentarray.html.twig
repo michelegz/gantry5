@@ -41,7 +41,9 @@
 {% set has_explicit_articles = filter.articles|default('')|trim != '' %}
 {% if (recent_days > 0 or is_hits_recent) and not has_explicit_articles %}
     {% set days = recent_days > 0 ? recent_days : 30 %}
-    {% set cutoff = ("now"|date_modify("-" ~ days ~ " days"))|date("Y-m-d H:i:s") %}
+    {# DB publish_up is UTC: build the cutoff in UTC, otherwise the site offset
+       (e.g. Europe/Rome +2h) shifts the window. #}
+    {% set cutoff = ("now"|date_modify("-" ~ days ~ " days"))|date("Y-m-d H:i:s", "UTC") %}
     {% do article_finder.where('a.publish_up', '>=', cutoff) %}
 {% endif %}
 
